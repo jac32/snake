@@ -8,7 +8,8 @@ use std::collections::VecDeque;
 use std::thread;
 use std::time::Duration;
 
-const WORLD_SIZE: usize =  10;
+const WORLD_SIZE: usize = 25;
+const TIMEOUT: i32 = 100;
     
 
 #[derive(Debug, PartialEq)]
@@ -137,24 +138,41 @@ impl Snake {
         }
         let &Point(x, y) = self.body.front().unwrap();
         chars[x as usize][y as usize] = 'O';
+
         let Point(x, y) = self.food;
         chars[x as usize][y as usize] = '$';
         
-        for i in 0..WORLD_SIZE {
-            for j in 0..WORLD_SIZE {
-                let pair = match chars[i][j] {
-                    'O' => 1,
-                    'X' => 2,
-                    '$' => 3,
-                    _ => 0,
-                };
+        for i in 0..WORLD_SIZE + 2 {
+            for j in 0..WORLD_SIZE + 2 {
 
-                attron(COLOR_PAIR(pair));
-                mvprintw(i as i32 + 10 , (j*2) as i32 + 10 ,&format!("{} ", chars[i][j]));
-                attroff(COLOR_PAIR(pair));
+                if i < WORLD_SIZE && j < WORLD_SIZE {
+                    let pair = match chars[i][j] {
+                        'O' => 1,
+                        'X' => 2,
+                        '$' => 3,
+                        _ => 0,
+                    };
+                    attron(COLOR_PAIR(pair));
+                    mvprintw(i as i32 + 1, (2 * (j + 1)) as i32, &format!("  "));
+                    attroff(COLOR_PAIR(pair));
+                }
 
+                attron(COLOR_PAIR(4));
+                if i == 0 {
+                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
+                }
+                if j == 0 {
+                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
+                }
+                if i == WORLD_SIZE + 1 {
+                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
+                }    
+
+                if j == WORLD_SIZE + 1 {
+                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
+                }
+                attroff(COLOR_PAIR(1));
             }
-            printw("\n");
         }
     }
 }
@@ -168,13 +186,15 @@ fn main() {
         
         start_color();
         cbreak();
-        timeout(250);
+        timeout(100);
         keypad(stdscr, true);
         snake.display();
-        init_pair(1, COLOR_RED, COLOR_BLACK);
-        init_pair(2, COLOR_GREEN, COLOR_BLACK);
-        init_pair(3, COLOR_YELLOW, COLOR_BLACK);
-        
+        init_pair(1, COLOR_BLACK, COLOR_RED);
+        init_pair(2, COLOR_BLACK, COLOR_GREEN);
+        init_pair(3, COLOR_BLACK, COLOR_YELLOW);
+        init_pair(4, COLOR_BLACK, COLOR_BLUE);
+        init_pair(5, COLOR_RED, COLOR_BLACK);
+
         /* Update the screen. */
         refresh();
         /* Wait for a key press. */
@@ -191,13 +211,14 @@ fn main() {
                 refresh();    
             } else {
                 // Print ASCII GameOver
-	        attron(COLOR_PAIR(1));
+	        attron(COLOR_PAIR(5));
+                clear();
                 printw("  _____               ____              
  / ___/__ ___ _  ___ / __ \\_  _____ ____
 / (_ / _ `/  ' \\/ -_) /_/ / |/ / -_) __/
 \\___/\\_,_/_/_/_/\\__/\\____/|___/\\__/_/   ");
                 
-	        attroff(COLOR_PAIR(1));
+	        attroff(COLOR_PAIR(4));
                 refresh();
                 thread::sleep(Duration::new(10, 0));
                 break;
