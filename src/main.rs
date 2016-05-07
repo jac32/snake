@@ -83,6 +83,14 @@ impl Snake {
         }
     }
 
+    fn contains(&self, point: &Point) -> bool {
+        if self.body.iter().all(|part| { part != point }) {
+            false
+        } else {
+            true
+        }
+    }
+    
     fn next(&self) -> Option<Point> {
         let &Point(head_x, head_y) = self.body.front().unwrap();
         let (offset_x, offset_y) = self.direction.get_offset();
@@ -93,18 +101,27 @@ impl Snake {
         if let Some(next) = snake.next() {
             // If the snake eats the food, generate a new one and do not pop the tail off
             if next == snake.food {
-                snake.food = Point::rand(&mut rand::thread_rng());
+                snake.gen_food();
             } else {
                 snake.body.pop_back();
             }
 
             // Check to see if the VecDeque of the snake's body includes the destination point
-            if snake.body.iter().all(|point| { *point != next }) {
+            if !snake.contains(&next) {
                 snake.body.push_front(next);
                 return Some(snake)
             } 
         }
         None
+    }
+
+    fn gen_food(&mut self) {
+        let food =  Point::rand(&mut rand::thread_rng());
+        if self.contains(&food) {
+            self.gen_food();
+        } else {
+            self.food = food;
+        }
     }
 
     fn turn(&mut self, direction: Direction) {
@@ -125,7 +142,17 @@ impl Snake {
         
         for i in 0..WORLD_SIZE {
             for j in 0..WORLD_SIZE {
-                mvprintw(i as i32, (j*2) as i32 ,&format!("{} ", chars[i][j]));
+                let pair = match chars[i][j] {
+                    'O' => 1,
+                    'X' => 2,
+                    '$' => 3,
+                    _ => 0,
+                };
+
+                attron(COLOR_PAIR(pair));
+                mvprintw(i as i32 + 10 , (j*2) as i32 + 10 ,&format!("{} ", chars[i][j]));
+                attroff(COLOR_PAIR(pair));
+
             }
             printw("\n");
         }
@@ -136,39 +163,52 @@ fn main() {
     let mut snake = Snake::new();
     /* Start ncurses. */
     initscr();
-    cbreak();
-    timeout(250);
-    keypad(stdscr, true);
-    snake.display();
 
-    
-    /* Update the screen. */
-    refresh();
-    /* Wait for a key press. */
-    loop {
-        let ch = getch();
-        if ch == ncurses::KEY_LEFT { snake.turn(Direction::West); };
-        if ch == ncurses::KEY_RIGHT { snake.turn(Direction::East); };
-        if ch == ncurses::KEY_UP { snake.turn(Direction::North); };
-        if ch == ncurses::KEY_DOWN { snake.turn(Direction::South); };
+    if has_colors() {
         
-        if let Some(moved_snake) = Snake::step(snake) {
-            snake = moved_snake;
-            snake.display();
-            refresh();    
-        } else {
-            // Print ASCII GameOver
-            printw("  _____               ____              
+        start_color();
+        cbreak();
+        timeout(250);
+        keypad(stdscr, true);
+        snake.display();
+        init_pair(1, COLOR_RED, COLOR_BLACK);
+        init_pair(2, COLOR_GREEN, COLOR_BLACK);
+        init_pair(3, COLOR_YELLOW, COLOR_BLACK);
+        
+        /* Update the screen. */
+        refresh();
+        /* Wait for a key press. */
+        loop {
+            let ch = getch();
+            if ch == ncurses::KEY_LEFT { snake.turn(Direction::West); };
+            if ch == ncurses::KEY_RIGHT { snake.turn(Direction::East); };
+            if ch == ncurses::KEY_UP { snake.turn(Direction::North); };
+            if ch == ncurses::KEY_DOWN { snake.turn(Direction::South); };
+            
+            if let Some(moved_snake) = Snake::step(snake) {
+                snake = moved_snake;
+                snake.display();
+                refresh();    
+            } else {
+                // Print ASCII GameOver
+	        attron(COLOR_PAIR(1));
+                printw("  _____               ____              
  / ___/__ ___ _  ___ / __ \\_  _____ ____
 / (_ / _ `/  ' \\/ -_) /_/ / |/ / -_) __/
 \\___/\\_,_/_/_/_/\\__/\\____/|___/\\__/_/   ");
-            
-            refresh();
-            thread::sleep(Duration::new(10, 0));
-            break;
+                
+	        attroff(COLOR_PAIR(1));
+                refresh();
+                thread::sleep(Duration::new(10, 0));
+                break;
+            }
         }
+        
+        /* Terminate ncurses. */
+        
+        endwin();
+    }else{
+	endwin();
+	println!("Your terminal does not support color");
     }
-    
-    /* Terminate ncurses. */
-    endwin();
 }
