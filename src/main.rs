@@ -1,35 +1,44 @@
+extern crate termion;
 extern crate rand;
-extern crate ncurses;
 
-use ncurses::*;
+use termion::color;
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
+
 use rand::{Rand, Rng};
 
 use std::collections::VecDeque;
 use std::thread;
 use std::time::Duration;
 
-const WORLD_SIZE: usize = 25;
-const TIMEOUT: i32 = 100;
-    
+use std::io;
+
+const WORLD_SIZE: u16 = 20;
+
 
 #[derive(Debug, PartialEq)]
-struct Point (i32, i32);
+struct Point (u16, u16);
 
 impl Rand for Point {
     fn rand<R: Rng>(rng: &mut R) -> Self {
-        let x: i32 = rng.gen_range(0, WORLD_SIZE as i32);
-        let y: i32 = rng.gen_range(0, WORLD_SIZE as i32);
-        Point(x, y)
+        let x = rng.gen_range(0, WORLD_SIZE as i32);
+        let y = rng.gen_range(0, WORLD_SIZE as i32);
+        Point(x as u16, y as u16)
     }
 }
 
 impl Point {
-    fn new(x: i32, y: i32, limit: usize) -> Option<Point> {
-        if x >= limit as i32 || y >= limit as i32 || x < 0 || y < 0 {
+    // TODO: change out for Result type
+    fn new(x: u16, y: u16, limit: u16) -> Option<Point> {
+        if x >= limit || y >= limit || x < 0 || y < 0 {
             None
         } else {
             Some(Point(x, y))
         }
+    }
+    fn to_screen_coord(&self) -> (Point, Point){
+        let Point(x, y) = *self;
+        (Point(x * 2, y), Point(x * 2 + 1, y))
     }
 }
 
@@ -45,10 +54,10 @@ enum Direction {
 impl Direction {
     fn get_offset(&self) -> (i32, i32){
         match *self {
-            Direction::West => (0, -1),
-            Direction::East => (0, 1),
-            Direction::North => (-1, 0),
-            Direction::South => (1, 0),
+            Direction::West => (-1, 0),
+            Direction::East => (1, 0),
+            Direction::North => (0, -1),
+            Direction::South => (0, 1),
         } 
     }
     fn get_opposite(&self) -> Direction {
@@ -62,25 +71,28 @@ impl Direction {
 }
 
 
-#[derive(Debug)]
-struct Snake {
+struct Snake<R, W> {
     body: VecDeque<Point>,
     direction: Direction,
-    world_size: usize,
+    world_size: u16,
     food: Point,
+    key_reader: termion::input::Keys<R>,
+    output_writer: W,
 }
-impl Snake {
-    fn new() -> Snake {
+impl<R: io::Read, W> Snake<R, W> {
+    fn new(stdin: R, stdout: W) -> Snake<R, W> {
         let mut body = VecDeque::new();
-        body.push_front(Point(0, 1));
-        body.push_front(Point(1, 1));
-        body.push_front(Point(2, 1));
         body.push_front(Point(3, 1));
+        body.push_front(Point(4, 1));
+        body.push_front(Point(5, 1));
+        body.push_front(Point(6, 1));
         Snake {
             body: body,
             direction: Direction::South,
             world_size: WORLD_SIZE,
             food: Point::rand(&mut rand::thread_rng()),
+            key_reader: stdin.keys(),
+            output_writer: stdout,
         }
     }
 
@@ -93,12 +105,16 @@ impl Snake {
     }
     
     fn next(&self) -> Option<Point> {
-        let &Point(head_x, head_y) = self.body.front().unwrap();
+        let &Point(head_x, head_y) = self.body.front().expect("body deque should have content");
         let (offset_x, offset_y) = self.direction.get_offset();
-        Point::new(head_x + offset_x, head_y + offset_y, self.world_size)
+        Point::new(
+            (head_x as i32 + offset_x) as u16,
+            (head_y as i32 + offset_y) as u16,
+            self.world_size
+        )
     }
     
-    fn step(mut snake: Snake) -> Option<Snake> {
+    fn step(mut snake: Snake<R, W>) -> Option<Snake<R, W>> {
         if let Some(next) = snake.next() {
             // If the snake eats the food, generate a new one and do not pop the tail off
             if next == snake.food {
@@ -131,105 +147,62 @@ impl Snake {
         }
     }
 
-    fn display(&self) {
-        let mut chars = [['-'; WORLD_SIZE]; WORLD_SIZE];
-        for &Point(x, y) in &self.body {
-            chars[x as usize][y as usize] = 'X';
-        }
-        let &Point(x, y) = self.body.front().unwrap();
-        chars[x as usize][y as usize] = 'O';
-
-        let Point(x, y) = self.food;
-        chars[x as usize][y as usize] = '$';
-        
-        for i in 0..WORLD_SIZE + 2 {
-            for j in 0..WORLD_SIZE + 2 {
-
-                if i < WORLD_SIZE && j < WORLD_SIZE {
-                    let pair = match chars[i][j] {
-                        'O' => 1,
-                        'X' => 2,
-                        '$' => 3,
-                        _ => 0,
-                    };
-                    attron(COLOR_PAIR(pair));
-                    mvprintw(i as i32 + 1, (2 * (j + 1)) as i32, &format!("  "));
-                    attroff(COLOR_PAIR(pair));
-                }
-
-                attron(COLOR_PAIR(4));
-                if i == 0 {
-                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
-                }
-                if j == 0 {
-                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
-                }
-                if i == WORLD_SIZE + 1 {
-                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
-                }    
-
-                if j == WORLD_SIZE + 1 {
-                    mvprintw(i as i32, (j * 2) as i32, &format!("  "));
-                }
-                attroff(COLOR_PAIR(1));
-            }
+    fn handle_input(&mut self) {
+        use termion::event::Key::*;
+        match self.key_reader.next().unwrap().unwrap() {
+            Char('j') | Char('s') | Down  => self.turn(Direction::South),
+            Char('k') | Char('w') | Up    => self.turn(Direction::North),
+            Char('h') | Char('a') | Left  => self.turn(Direction::West),
+            Char('l') | Char('d') | Right => self.turn(Direction::East),
+            _ => println!("nothing"),
         }
     }
-}
+
+    fn draw_body_piece(piece: &Point) {
+       Self::draw_block(piece, color::Fg(color::Green));
+    }
+
+    fn draw_food_piece(piece: &Point) {
+       Self::draw_block(piece, color::Fg(color::Red));
+    }
+
+    fn draw_block<C: std::fmt::Display>(piece: &Point, color: C) {
+        let block = '█';
+        let (Point(x1, y1), Point(x2, y2)) = piece.to_screen_coord();
+        print!("{}{}{}", termion::cursor::Goto(x1, y1), color, block);
+        print!("{}{}{}", termion::cursor::Goto(x2, y2), color, block); 
+    }
     
-fn main() {
-    let mut snake = Snake::new();
-    /* Start ncurses. */
-    initscr();
 
-    if has_colors() {
-        
-        start_color();
-        cbreak();
-        timeout(100);
-        keypad(stdscr, true);
-        snake.display();
-        init_pair(1, COLOR_BLACK, COLOR_RED);
-        init_pair(2, COLOR_BLACK, COLOR_GREEN);
-        init_pair(3, COLOR_BLACK, COLOR_YELLOW);
-        init_pair(4, COLOR_BLACK, COLOR_BLUE);
-        init_pair(5, COLOR_RED, COLOR_BLACK);
-
-        /* Update the screen. */
-        refresh();
-        /* Wait for a key press. */
-        loop {
-            let ch = getch();
-            if ch == ncurses::KEY_LEFT { snake.turn(Direction::West); };
-            if ch == ncurses::KEY_RIGHT { snake.turn(Direction::East); };
-            if ch == ncurses::KEY_UP { snake.turn(Direction::North); };
-            if ch == ncurses::KEY_DOWN { snake.turn(Direction::South); };
-            
-            if let Some(moved_snake) = Snake::step(snake) {
-                snake = moved_snake;
-                snake.display();
-                refresh();    
-            } else {
-                // Print ASCII GameOver
-	        attron(COLOR_PAIR(5));
-                clear();
-                printw("  _____               ____              
- / ___/__ ___ _  ___ / __ \\_  _____ ____
-/ (_ / _ `/  ' \\/ -_) /_/ / |/ / -_) __/
-\\___/\\_,_/_/_/_/\\__/\\____/|___/\\__/_/   ");
-                
-	        attroff(COLOR_PAIR(4));
-                refresh();
-                thread::sleep(Duration::new(10, 0));
-                break;
-            }
+    fn draw(&self) {
+        print!("{}", termion::clear::All);
+        for piece in &self.body {
+            Self::draw_body_piece(piece);
         }
-        
-        /* Terminate ncurses. */
-        
-        endwin();
-    }else{
-	endwin();
-	println!("Your terminal does not support color");
+        Self::draw_food_piece(&self.food);
+        println!("");
+    }
+}
+
+
+
+
+
+fn main() {
+    let stdin = std::io::stdin();
+
+    
+    let stdout = io::stdout();
+    let stdout = stdout.lock();
+    let stdout = stdout.into_raw_mode().unwrap();   
+    print!("{}", termion::cursor::Hide);
+
+
+    let mut snake = Snake::new(stdin.lock(), stdout);
+    loop {
+        snake = Snake::step(snake).unwrap();
+        snake.handle_input();
+        snake.draw();
+        thread::sleep(Duration::from_millis(100));
     }
 }
