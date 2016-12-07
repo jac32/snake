@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use std::io;
+use std::io::Read;
 
 const WORLD_SIZE: u16 = 20;
 const X_OFFSET: u16 = 5;
@@ -23,7 +24,7 @@ struct Point (u16, u16);
 impl Rand for Point {
     fn rand<R: Rng>(rng: &mut R) -> Self {
         let x = rng.gen_range(X_OFFSET + 1, WORLD_SIZE as u16);
-        let y = rng.gen_range(1, WORLD_SIZE as i32);
+        let y = rng.gen_range(2, WORLD_SIZE as i32);
         Point(x as u16, y as u16)
     }
 }
@@ -77,22 +78,22 @@ struct Snake<R, W> {
     direction: Direction,
     world_size: u16,
     food: Point,
-    key_reader: termion::input::Keys<R>,
+    key_reader: io::Bytes<R>,
     output_writer: W,
 }
 impl<R: io::Read, W> Snake<R, W> {
     fn new(stdin: R, stdout: W) -> Snake<R, W> {
         let mut body = VecDeque::new();
-        body.push_front(Point(3, 1));
-        body.push_front(Point(4, 1));
-        body.push_front(Point(5, 1));
-        body.push_front(Point(6, 1));
+        body.push_front(Point(3, 3));
+        body.push_front(Point(4, 3));
+        body.push_front(Point(5, 3));
+        body.push_front(Point(6, 3));
         Snake {
             body: body,
             direction: Direction::South,
             world_size: WORLD_SIZE,
             food: Point::rand(&mut rand::thread_rng()),
-            key_reader: stdin.keys(),
+            key_reader: stdin.bytes(),
             output_writer: stdout,
         }
     }
@@ -149,12 +150,12 @@ impl<R: io::Read, W> Snake<R, W> {
     }
 
     fn handle_input(&mut self) {
-        use termion::event::Key::*;
-        match self.key_reader.next().unwrap().unwrap() {
-            Char('j') | Char('s') | Down  => self.turn(Direction::South),
-            Char('k') | Char('w') | Up    => self.turn(Direction::North),
-            Char('h') | Char('a') | Left  => self.turn(Direction::West),
-            Char('l') | Char('d') | Right => self.turn(Direction::East),
+        //use termion::event::Key::*;
+        match self.key_reader.next().unwrap_or(Ok(b'x')).unwrap() {
+            b'j' | b's' => self.turn(Direction::South),
+            b'k' | b'w' => self.turn(Direction::North),
+            b'h' | b'a' => self.turn(Direction::West),
+            b'l' | b'd' => self.turn(Direction::East),
             _ => println!("nothing"),
         }
     }
@@ -193,16 +194,14 @@ impl<R: io::Read, W> Snake<R, W> {
 
 
 fn main() {
-    let stdin = std::io::stdin();
+    //let stdin = std::io::stdin();
 
-    
     let stdout = io::stdout();
     let stdout = stdout.lock();
     let stdout = stdout.into_raw_mode().unwrap();   
     print!("{}", termion::cursor::Hide);
 
-
-    let mut snake = Snake::new(stdin.lock(), stdout);
+    let mut snake = Snake::new(termion::async_stdin(), stdout);
     loop {
         snake = Snake::step(snake).unwrap();
         snake.handle_input();
