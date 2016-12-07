@@ -14,6 +14,7 @@ use std::time::Duration;
 use std::io;
 
 const WORLD_SIZE: u16 = 20;
+const X_OFFSET: u16 = 5;
 
 
 #[derive(Debug, PartialEq)]
@@ -21,8 +22,8 @@ struct Point (u16, u16);
 
 impl Rand for Point {
     fn rand<R: Rng>(rng: &mut R) -> Self {
-        let x = rng.gen_range(0, WORLD_SIZE as i32);
-        let y = rng.gen_range(0, WORLD_SIZE as i32);
+        let x = rng.gen_range(X_OFFSET + 1, WORLD_SIZE as u16);
+        let y = rng.gen_range(1, WORLD_SIZE as i32);
         Point(x as u16, y as u16)
     }
 }
@@ -30,7 +31,7 @@ impl Rand for Point {
 impl Point {
     // TODO: change out for Result type
     fn new(x: u16, y: u16, limit: u16) -> Option<Point> {
-        if x >= limit || y >= limit || x < 0 || y < 0 {
+        if x >= limit + X_OFFSET || y >= limit  || x <= X_OFFSET || y == 1 {
             None
         } else {
             Some(Point(x, y))
@@ -159,23 +160,29 @@ impl<R: io::Read, W> Snake<R, W> {
     }
 
     fn draw_body_piece(piece: &Point) {
-       Self::draw_block(piece, color::Fg(color::Green));
+       Self::draw_block(piece, color::Bg(color::Green));
     }
 
     fn draw_food_piece(piece: &Point) {
-       Self::draw_block(piece, color::Fg(color::Red));
+       Self::draw_block(piece, color::Bg(color::Red));
     }
 
     fn draw_block<C: std::fmt::Display>(piece: &Point, color: C) {
-        let block = '█';
+        let block = ' ';
         let (Point(x1, y1), Point(x2, y2)) = piece.to_screen_coord();
-        print!("{}{}{}", termion::cursor::Goto(x1, y1), color, block);
-        print!("{}{}{}", termion::cursor::Goto(x2, y2), color, block); 
+        print!("{}{}{}{}", termion::cursor::Goto(x1, y1), color, block, color::Bg(color::Reset));
+        print!("{}{}{}{}", termion::cursor::Goto(x2, y2), color, block, color::Bg(color::Reset)); 
     }
     
 
     fn draw(&self) {
         print!("{}", termion::clear::All);
+        for i in 0..WORLD_SIZE {
+            Self::draw_block(&Point(X_OFFSET, i+1), color::Bg(color::Blue));
+            Self::draw_block(&Point(i + X_OFFSET, 0), color::Bg(color::Blue));
+            Self::draw_block(&Point(WORLD_SIZE + X_OFFSET, i+1), color::Bg(color::Blue));
+            Self::draw_block(&Point(i + X_OFFSET, WORLD_SIZE), color::Bg(color::Blue));
+        }
         for piece in &self.body {
             Self::draw_body_piece(piece);
         }
@@ -183,9 +190,6 @@ impl<R: io::Read, W> Snake<R, W> {
         println!("");
     }
 }
-
-
-
 
 
 fn main() {
