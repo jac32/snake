@@ -17,8 +17,17 @@ use std::io::Read;
 const WORLD_SIZE: u16 = 20;
 const X_OFFSET: u16 = 5;
 
+#[derive(PartialEq)]
+enum Event {
+    Death,
+    EatFood,
+}
 
-#[derive(Debug, PartialEq)]
+enum Error {
+    OutOfBounds,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct Point (u16, u16);
 
 impl Rand for Point {
@@ -31,16 +40,17 @@ impl Rand for Point {
 
 impl Point {
     // TODO: change out for Result type
-    fn new(x: u16, y: u16, limit: u16) -> Option<Point> {
+    fn new(x: u16, y: u16, limit: u16) -> Result<Point, Error> {
         if x >= limit + X_OFFSET || y >= limit  || x <= X_OFFSET || y == 1 {
-            None
+            Err(Error::OutOfBounds)
         } else {
-            Some(Point(x, y))
+            Ok(Point(x, y))
         }
     }
-    fn to_screen_coord(&self) -> (Point, Point){
+
+    fn to_screen_coord(&self) -> Point {
         let Point(x, y) = *self;
-        (Point(x * 2, y), Point(x * 2 + 1, y))
+        Point(x * 2, y)
     }
 }
 
@@ -106,7 +116,7 @@ impl<R: io::Read, W> Snake<R, W> {
         }
     }
     
-    fn next(&self) -> Option<Point> {
+    fn next(&self) -> Result<Point, Error> {
         let &Point(head_x, head_y) = self.body.front().expect("body deque should have content");
         let (offset_x, offset_y) = self.direction.get_offset();
         Point::new(
@@ -115,23 +125,23 @@ impl<R: io::Read, W> Snake<R, W> {
             self.world_size
         )
     }
-    
-    fn step(mut snake: Snake<R, W>) -> Option<Snake<R, W>> {
-        if let Some(next) = snake.next() {
-            // If the snake eats the food, generate a new one and do not pop the tail off
-            if next == snake.food {
-                snake.gen_food();
-            } else {
-                snake.body.pop_back();
+
+    fn step(&mut self) -> Option<Event> {
+        self.next().map(|next| {
+            
+            if self.body.contains(&next) {
+                return Some(Event::Death)
             }
 
-            // Check to see if the VecDeque of the snake's body includes the destination point
-            if !snake.contains(&next) {
-                snake.body.push_front(next);
-                return Some(snake)
-            } 
-        }
-        None
+            if next != self.food {
+                self.body.pop_back();
+                self.body.push_front(next);
+                None
+            } else {
+                self.body.push_front(next);
+                Some(Event::EatFood)
+            }
+        }).unwrap_or(Some(Event::Death))
     }
 
     fn gen_food(&mut self) {
@@ -150,7 +160,6 @@ impl<R: io::Read, W> Snake<R, W> {
     }
 
     fn handle_input(&mut self) {
-        //use termion::event::Key::*;
         match self.key_reader.next().unwrap_or(Ok(b'x')).unwrap() {
             b'j' | b's' => self.turn(Direction::South),
             b'k' | b'w' => self.turn(Direction::North),
@@ -161,18 +170,17 @@ impl<R: io::Read, W> Snake<R, W> {
     }
 
     fn draw_body_piece(piece: &Point) {
-       Self::draw_block(piece, color::Bg(color::Green));
+        Self::draw_block(piece, color::Bg(color::Green));
     }
 
     fn draw_food_piece(piece: &Point) {
-       Self::draw_block(piece, color::Bg(color::Red));
+        Self::draw_block(piece, color::Bg(color::Red));
     }
 
     fn draw_block<C: std::fmt::Display>(piece: &Point, color: C) {
-        let block = ' ';
-        let (Point(x1, y1), Point(x2, y2)) = piece.to_screen_coord();
-        print!("{}{}{}{}", termion::cursor::Goto(x1, y1), color, block, color::Bg(color::Reset));
-        print!("{}{}{}{}", termion::cursor::Goto(x2, y2), color, block, color::Bg(color::Reset)); 
+        let block = "  ";
+        let Point(x, y) = piece.to_screen_coord();
+        print!("{}{}{}{}", termion::cursor::Goto(x, y), color, block, color::Bg(color::Reset));
     }
     
 
@@ -192,20 +200,46 @@ impl<R: io::Read, W> Snake<R, W> {
     }
 }
 
+fn clear_screen() {
+    print!("{}", termion::clear::All);
+    print!("{}", termion::cursor::Goto(1, 1));
+}
+
+fn hide_cursor() {
+    print!("{}", termion::cursor::Hide);
+}
 
 fn main() {
-    //let stdin = std::io::stdin();
-
+    // Establish lock on stdout and enter raw mode for increased control
     let stdout = io::stdout();
     let stdout = stdout.lock();
     let stdout = stdout.into_raw_mode().unwrap();   
-    print!("{}", termion::cursor::Hide);
+
+    hide_cursor();
 
     let mut snake = Snake::new(termion::async_stdin(), stdout);
+
+    let mut score = 0;
     loop {
-        snake = Snake::step(snake).unwrap();
-        snake.handle_input();
-        snake.draw();
-        thread::sleep(Duration::from_millis(100));
+        match snake.step() {
+            Some(Event::Death) => {
+                thread::sleep(Duration::from_millis(600));
+                clear_screen();
+                break
+            },
+            safe_event => {
+                if safe_event == Some(Event::EatFood) {
+                    score += 1;
+                    snake.gen_food();
+                }
+                snake.handle_input();
+                snake.draw();
+                thread::sleep(Duration::from_millis(100));
+            }
+
+        }
     }
+
+    clear_screen();
+    println!("Your score was: {}\n", score);
 }
